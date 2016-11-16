@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	status "github.com/Financial-Times/service-status-go/httphandlers"
+	"github.com/Financial-Times/v1-people-transformer/people"
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
 	"github.com/jawher/mow.cli"
@@ -74,7 +75,7 @@ func main() {
 
 	app.Action = func() {
 
-		r := router(peopleHandler{})
+		r := router(people.PeopleHandler{})
 		http.Handle("/", r)
 
 		log.Printf("listening on %d", *port)
@@ -86,7 +87,7 @@ func main() {
 	app.Run(os.Args)
 }
 
-func router(handler peopleHandler) http.Handler {
+func router(handler people.PeopleHandler) http.Handler {
 	servicesRouter := mux.NewRouter()
 	// The top one of these feels more correct, but the lower one matches what we have in Dropwizard,
 	// so it's what apps expect currently same as ping
