@@ -1,0 +1,10 @@
+*.exe*
+*-config.json
+*.log
+*.html
+*coverage.*
+*.iml
+v1-people-transformer
+.idea/
+*.db
+*.lock
