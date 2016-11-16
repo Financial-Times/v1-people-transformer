@@ -30,4 +30,4 @@ RUN apk add --no-cache bash \
   && apk del .build-dependencies \
   && rm -rf $GOPATH /var/cache/apk/*
 
-CMD [ "/app" ]
+CMD [ "/v1-people-transformer" ]
