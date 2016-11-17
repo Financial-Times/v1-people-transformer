@@ -69,7 +69,7 @@ func main() {
 		EnvVar: "CACHE_FILE_NAME",
 	})
 
-	tmeTaxonomyName := "ON"
+	tmeTaxonomyName := "PN"
 
 	log.Printf("%s, %s, %s, %s, %s, %s, %s, %s, %s", username, password, token, baseURL, tmeBaseURL, maxRecords, batchSize, cacheFileName, tmeTaxonomyName)
 

@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -17,35 +18,14 @@ type testSuiteForPeople struct {
 	err   error
 }
 
-func createTestPeopleService(t *testing.T, repo tmereader.Repository, cacheFileName string) peopleService {
-	service := newPeopleService(repo, "/base/url", "taxonomy_string", 10, cacheFileName)
-	return service
-}
-
-func getTempFile(t *testing.T) *os.File {
-	tmpfile, err := ioutil.TempFile("", "example")
-	assert.NoError(t, err)
-	assert.NoError(t, tmpfile.Close())
-	log.Debug("File:%s", tmpfile.Name())
-	return tmpfile
-}
-
-func waitTillInit(t *testing.T, s peopleService) {
-	for i := 1; i <= 1000; i++ {
-		if s.isInitialised() {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
 func TestInit(t *testing.T) {
 	tmpfile := getTempFile(t)
 	defer os.Remove(tmpfile.Name())
 	service := createTestPeopleService(t, &dummyRepo{}, tmpfile.Name())
+	assert.False(t, service.isInitialised())
 	defer service.shutdown()
 	waitTillInit(t, service)
-	assert.Equal(t, true, service.isInitialised())
+	assert.True(t, service.isInitialised())
 }
 
 func TestGetPeople(t *testing.T) {
@@ -85,22 +65,46 @@ func TestGetPersonByUUID(t *testing.T) {
 
 }
 
+func createTestPeopleService(t *testing.T, repo tmereader.Repository, cacheFileName string) peopleService {
+	service := newPeopleService(repo, "/base/url", "taxonomy_string", 1, cacheFileName)
+	return service
+}
+
+func getTempFile(t *testing.T) *os.File {
+	tmpfile, err := ioutil.TempFile("", "example")
+	assert.NoError(t, err)
+	assert.NoError(t, tmpfile.Close())
+	log.Debug("File:%s", tmpfile.Name())
+	return tmpfile
+}
+
+func waitTillInit(t *testing.T, s peopleService) {
+	for i := 1; i <= 1000; i++ {
+		if s.isInitialised() {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 type dummyRepo struct {
+	sync.Mutex
 	terms []term
 	err   error
+	count int
 }
 
 func (d *dummyRepo) GetTmeTermsFromIndex(startRecord int) ([]interface{}, error) {
-	if startRecord > 0 {
+	defer func() {
+		d.count++
+	}()
+	if len(d.terms) == d.count {
 		return nil, d.err
 	}
-	var interfaces = make([]interface{}, len(d.terms))
-	for i, data := range d.terms {
-		interfaces[i] = data
-	}
-	return interfaces, d.err
+	return []interface{}{d.terms[d.count]}, d.err
 }
 
+// Never used
 func (d *dummyRepo) GetTmeTermById(uuid string) (interface{}, error) {
-	return d.terms[0], d.err
+	return nil, nil
 }

@@ -26,6 +26,7 @@ type peopleService interface {
 }
 
 type peopleServiceImpl struct {
+	sync.RWMutex
 	repository    tmereader.Repository
 	baseURL       string
 	personLinks   []personLink
@@ -39,21 +40,22 @@ type peopleServiceImpl struct {
 func newPeopleService(repo tmereader.Repository, baseURL string, taxonomyName string, maxTmeRecords int, cacheFileName string) peopleService {
 	s := &peopleServiceImpl{repository: repo, baseURL: baseURL, taxonomyName: taxonomyName, maxTmeRecords: maxTmeRecords, initialised: false, cacheFileName: cacheFileName}
 	go func(service *peopleServiceImpl) {
-		err := service.init()
+		err := service.loadDB()
 		if err != nil {
-			log.Errorf("Error while creating OrgService: [%v]", err.Error())
+			log.Errorf("Error while creating PeopleService: [%v]", err.Error())
 		}
-		service.initialised = true
 	}(s)
 	return s
 }
 
 func (s *peopleServiceImpl) isInitialised() bool {
+	s.RLock()
+	defer s.RUnlock()
 	return s.initialised
 }
 
 func (s *peopleServiceImpl) shutdown() error {
-	log.Info("Shutingdowwn...")
+	log.Info("Shutingdown...")
 	if s.db == nil {
 		return errors.New("DB not open")
 	}
@@ -86,59 +88,55 @@ func (s *peopleServiceImpl) getPersonByUUID(uuid string) (person, bool, error) {
 		log.Infof("INFO No cached value for [%v]", uuid)
 		return person{}, false, nil
 	}
-	var cachedOrg person
-	err = json.Unmarshal(cachedValue, &cachedOrg)
+	var cachedPerson person
+	err = json.Unmarshal(cachedValue, &cachedPerson)
 	if err != nil {
 		log.Errorf("ERROR unmarshalling cached value for [%v]: %v", uuid, err.Error())
 		return person{}, true, err
 	}
-	return cachedOrg, true, nil
+	return cachedPerson, true, nil
 
 }
 
-func (s *peopleServiceImpl) init() error {
+func (s *peopleServiceImpl) loadDB() error {
+	c := make(chan []person)
+	go s.processPeople(c)
+	s.Lock()
+	defer func() {
+		close(c)
+		s.initialised = true
+		s.Unlock()
+	}()
 	var err error
 	s.db, err = bolt.Open(s.cacheFileName, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		log.Errorf("ERROR opening cache file for init: %v", err.Error())
 		return err
 	}
-	if err = createCacheBucket(s.db); err != nil {
+	if err = s.createCacheBucket(); err != nil {
 		return err
 	}
-	var wg sync.WaitGroup
+
 	responseCount := 0
-	log.Printf("Fetching people from TME\n")
 	for {
 		terms, err := s.repository.GetTmeTermsFromIndex(responseCount)
 		if err != nil {
 			return err
 		}
 		if len(terms) < 1 {
-			log.Printf("Finished fetching people from TME. Waiting subroutines to terminate\n")
+			log.Info("Finished fetching people from TME. Waiting subroutines to terminate")
 			break
 		}
-		wg.Add(1)
-		go s.initOrgsMap(terms, s.db, &wg)
+
+		log.Infof("Terms length is: %v", len(terms))
+		s.processTerms(terms, c)
 		responseCount += s.maxTmeRecords
 	}
-	wg.Wait()
-	log.Printf("Added %d person links\n", len(s.personLinks))
 	return nil
 }
 
-func createCacheBucket(db *bolt.DB) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		err := tx.DeleteBucket([]byte(cacheBucket))
-		if err != nil {
-			log.Warnf("Cache bucket [%v] could not be deleted\n", cacheBucket)
-		}
-		_, err = tx.CreateBucket([]byte(cacheBucket))
-		return err
-	})
-}
-
-func (s *peopleServiceImpl) initOrgsMap(terms []interface{}, db *bolt.DB, wg *sync.WaitGroup) {
+func (s *peopleServiceImpl) processTerms(terms []interface{}, c chan []person) {
+	log.Info("Processing terms...")
 	var cacheToBeWritten []person
 	for _, iTerm := range terms {
 		t := iTerm.(term)
@@ -147,32 +145,44 @@ func (s *peopleServiceImpl) initOrgsMap(terms []interface{}, db *bolt.DB, wg *sy
 		s.personLinks = append(s.personLinks, personLink{APIURL: s.baseURL + "/" + personUUID})
 		cacheToBeWritten = append(cacheToBeWritten, transformPerson(t, s.taxonomyName))
 	}
-
-	go storePersonToCache(db, cacheToBeWritten, wg)
+	c <- cacheToBeWritten
 }
 
-func storePersonToCache(db *bolt.DB, cacheToBeWritten []person, wg *sync.WaitGroup) {
-	defer wg.Done()
-	err := db.Batch(func(tx *bolt.Tx) error {
-
-		bucket := tx.Bucket([]byte(cacheBucket))
-		if bucket == nil {
-			return fmt.Errorf("Cache bucket [%v] not found!", cacheBucket)
-		}
-		for _, anPerson := range cacheToBeWritten {
-			marshalledOrg, err := json.Marshal(anPerson)
-			if err != nil {
-				return err
+func (s *peopleServiceImpl) processPeople(c chan []person) {
+	for people := range c {
+		log.Infof("Got people of: %v", people)
+		err := s.db.Batch(func(tx *bolt.Tx) error {
+			bucket := tx.Bucket([]byte(cacheBucket))
+			if bucket == nil {
+				return fmt.Errorf("Cache bucket [%v] not found!", cacheBucket)
 			}
-			err = bucket.Put([]byte(anPerson.UUID), marshalledOrg)
-			if err != nil {
-				return err
+			for _, anPerson := range people {
+				marshalledPerson, err := json.Marshal(anPerson)
+				if err != nil {
+					return err
+				}
+				err = bucket.Put([]byte(anPerson.UUID), marshalledPerson)
+				if err != nil {
+					return err
+				}
 			}
+			return nil
+		})
+		if err != nil {
+			log.Errorf("ERROR storing to cache: %+v", err)
 		}
-		return nil
-	})
-	if err != nil {
-		log.Errorf("ERROR storing to cache: %+v", err)
 	}
 
+	log.Info("Finished processing all people")
+}
+
+func (s *peopleServiceImpl) createCacheBucket() error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket([]byte(cacheBucket))
+		if err != nil {
+			log.Warnf("Cache bucket [%v] could not be deleted\n", cacheBucket)
+		}
+		_, err = tx.CreateBucket([]byte(cacheBucket))
+		return err
+	})
 }
