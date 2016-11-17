@@ -2,14 +2,20 @@ package main
 
 import (
 	"fmt"
+	"github.com/Financial-Times/go-fthealth/v1a"
+	"github.com/Financial-Times/service-status-go/gtg"
 	status "github.com/Financial-Times/service-status-go/httphandlers"
+	"github.com/Financial-Times/tme-reader/tmereader"
 	"github.com/Financial-Times/v1-people-transformer/people"
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
 	"github.com/jawher/mow.cli"
+	"github.com/sethgrid/pester"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"time"
 )
 
 func main() {
@@ -71,11 +77,28 @@ func main() {
 
 	tmeTaxonomyName := "PN"
 
-	log.Printf("%s, %s, %s, %s, %s, %s, %s, %s, %s", username, password, token, baseURL, tmeBaseURL, maxRecords, batchSize, cacheFileName, tmeTaxonomyName)
-
 	app.Action = func() {
-
-		r := router(people.PeopleHandler{})
+		client := getResilientClient()
+		modelTransformer := new(people.PersonTransformer)
+		s := people.NewPeopleService(
+			tmereader.NewTmeRepository(
+				client,
+				*tmeBaseURL,
+				*username,
+				*password,
+				*token,
+				*maxRecords,
+				*batchSize,
+				tmeTaxonomyName,
+				&tmereader.AuthorityFiles{},
+				modelTransformer),
+			*baseURL,
+			tmeTaxonomyName,
+			*maxRecords,
+			*cacheFileName)
+		defer s.Shutdown()
+		handler := people.NewPeopleHandler(s)
+		r := router(handler)
 		http.Handle("/", r)
 
 		log.Printf("listening on %d", *port)
@@ -96,35 +119,34 @@ func router(handler people.PeopleHandler) http.Handler {
 	servicesRouter.HandleFunc(status.BuildInfoPath, status.BuildInfoHandler)
 	servicesRouter.HandleFunc(status.BuildInfoPathDW, status.BuildInfoHandler)
 
-	////TODO: Fix the healthcheck call when implemented
-	////servicesRouter.HandleFunc("/__health", v1a.Handler("V1 People Transformer Healthchecks", "Checks for the health of the service", handler.HealthCheck))
-	//servicesRouter.HandleFunc("/__gtg", handler.GoodToGo)
-	//
-	//servicesRouter.HandleFunc("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}", handler.getPersonByUUID).Methods("GET")
-	//servicesRouter.HandleFunc("/transformers/people/__count", handler.count).Methods("GET")
-	//servicesRouter.HandleFunc("/transformers/people/__ids", handler.getPeopleUuids).Methods("GET")
+	servicesRouter.HandleFunc("/__health", v1a.Handler("V1 People Transformer Healthchecks", "Checks for the health of the service", handler.HealthCheck()))
+
+	g2gHandler := status.NewGoodToGoHandler(gtg.StatusChecker(handler.G2GCheck))
+	servicesRouter.HandleFunc(status.GTGPath, g2gHandler)
+
+	servicesRouter.HandleFunc("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}", handler.GetPersonByUUID).Methods("GET")
+	servicesRouter.HandleFunc("/transformers/people/__count", handler.GetCount).Methods("GET")
+	servicesRouter.HandleFunc("/transformers/people/__ids", handler.GetPeople).Methods("GET")
 
 	return servicesRouter
 }
 
-//
-//func getResilientClient() *pester.Client {
-//	tr := &http.Transport{
-//		MaxIdleConnsPerHost: 32,
-//		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-//		Dial: (&net.Dialer{
-//			Timeout:   30 * time.Second,
-//			KeepAlive: 30 * time.Second,
-//		}).Dial,
-//	}
-//	c := &http.Client{
-//		Transport: tr,
-//		Timeout:   30 * time.Second,
-//	}
-//	client := pester.NewExtendedClient(c)
-//	client.Backoff = pester.ExponentialBackoff
-//	client.MaxRetries = 5
-//	client.Concurrency = 1
-//
-//	return client
-//}
+func getResilientClient() *pester.Client {
+	tr := &http.Transport{
+		MaxIdleConnsPerHost: 32,
+		Dial: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).Dial,
+	}
+	c := &http.Client{
+		Transport: tr,
+		Timeout:   30 * time.Second,
+	}
+	client := pester.NewExtendedClient(c)
+	client.Backoff = pester.ExponentialBackoff
+	client.MaxRetries = 5
+	client.Concurrency = 1
+
+	return client
+}

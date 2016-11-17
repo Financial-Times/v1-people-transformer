@@ -18,11 +18,12 @@ const (
 	//tmeAuthority = "http://api.ft.com/system/FT-TME"
 )
 
-type peopleService interface {
+type PeopleService interface {
 	getPeople() ([]personLink, bool)
 	getPersonByUUID(uuid string) (person, bool, error)
+	getCount() (int, error)
 	isInitialised() bool
-	shutdown() error
+	Shutdown() error
 }
 
 type peopleServiceImpl struct {
@@ -37,7 +38,7 @@ type peopleServiceImpl struct {
 	db            *bolt.DB
 }
 
-func newPeopleService(repo tmereader.Repository, baseURL string, taxonomyName string, maxTmeRecords int, cacheFileName string) peopleService {
+func NewPeopleService(repo tmereader.Repository, baseURL string, taxonomyName string, maxTmeRecords int, cacheFileName string) PeopleService {
 	s := &peopleServiceImpl{repository: repo, baseURL: baseURL, taxonomyName: taxonomyName, maxTmeRecords: maxTmeRecords, initialised: false, cacheFileName: cacheFileName}
 	go func(service *peopleServiceImpl) {
 		err := service.loadDB()
@@ -54,12 +55,25 @@ func (s *peopleServiceImpl) isInitialised() bool {
 	return s.initialised
 }
 
-func (s *peopleServiceImpl) shutdown() error {
+func (s *peopleServiceImpl) Shutdown() error {
 	log.Info("Shutingdown...")
 	if s.db == nil {
 		return errors.New("DB not open")
 	}
 	return s.db.Close()
+}
+
+func (s *peopleServiceImpl) getCount() (int, error) {
+	var count int
+	err := s.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(cacheBucket))
+		if bucket == nil {
+			return fmt.Errorf("Bucket %v not found!", cacheBucket)
+		}
+		count = bucket.Stats().KeyN
+		return nil
+	})
+	return count, err
 }
 
 func (s *peopleServiceImpl) getPeople() ([]personLink, bool) {
