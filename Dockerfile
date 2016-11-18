@@ -4,6 +4,8 @@ ARG PROJECT=v1-people-transformer
 
 ADD . /${PROJECT}/
 
+RUN apk add --no-cache ca-certificates
+
 RUN apk add --no-cache bash \
   && apk --no-cache --virtual .build-dependencies add git go \
   && cd ${PROJECT} \
