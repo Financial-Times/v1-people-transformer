@@ -6,6 +6,9 @@ import (
 	"github.com/pborman/uuid"
 )
 
+type PersonTransformer struct {
+}
+
 func transformPerson(tmeTerm term, taxonomyName string) person {
 	tmeIdentifier := buildTmeIdentifier(tmeTerm.RawID, taxonomyName)
 	personUUID := uuid.NewMD5(uuid.UUID{}, []byte(tmeIdentifier)).String()
@@ -26,10 +29,7 @@ func buildTmeIdentifier(rawID string, tmeTermTaxonomyName string) string {
 	return id + "-" + taxonomyName
 }
 
-type personTransformer struct {
-}
-
-func (*personTransformer) UnMarshallTaxonomy(contents []byte) ([]interface{}, error) {
+func (*PersonTransformer) UnMarshallTaxonomy(contents []byte) ([]interface{}, error) {
 	t := taxonomy{}
 	err := xml.Unmarshal(contents, &t)
 	if err != nil {
@@ -42,7 +42,7 @@ func (*personTransformer) UnMarshallTaxonomy(contents []byte) ([]interface{}, er
 	return interfaces, nil
 }
 
-func (*personTransformer) UnMarshallTerm(content []byte) (interface{}, error) {
+func (*PersonTransformer) UnMarshallTerm(content []byte) (interface{}, error) {
 	dummyTerm := term{}
 	err := xml.Unmarshal(content, &dummyTerm)
 	if err != nil {

@@ -23,7 +23,7 @@ func TestInit(t *testing.T) {
 	defer os.Remove(tmpfile.Name())
 	service := createTestPeopleService(t, &dummyRepo{}, tmpfile.Name())
 	assert.False(t, service.isInitialised())
-	defer service.shutdown()
+	defer service.Shutdown()
 	waitTillInit(t, service)
 	assert.True(t, service.isInitialised())
 }
@@ -33,11 +33,23 @@ func TestGetPeople(t *testing.T) {
 	defer os.Remove(tmpfile.Name())
 	repo := dummyRepo{terms: []term{{CanonicalName: "Bob", RawID: "bob"}, {CanonicalName: "Fred", RawID: "fred"}}}
 	service := createTestPeopleService(t, &repo, tmpfile.Name())
-	defer service.shutdown()
+	defer service.Shutdown()
 	waitTillInit(t, service)
 	peopleLinks, found := service.getPeople()
 	assert.True(t, found)
 	assert.Len(t, peopleLinks, 2)
+}
+
+func TestGetCount(t *testing.T) {
+	tmpfile := getTempFile(t)
+	defer os.Remove(tmpfile.Name())
+	repo := dummyRepo{terms: []term{{CanonicalName: "Bob", RawID: "bob"}, {CanonicalName: "Fred", RawID: "fred"}}}
+	service := createTestPeopleService(t, &repo, tmpfile.Name())
+	defer service.Shutdown()
+	waitTillInit(t, service)
+	count, err := service.getCount()
+	assert.NoError(t, err)
+	assert.Equal(t, 2, count)
 }
 
 func TestGetPersonByUUID(t *testing.T) {
@@ -45,7 +57,7 @@ func TestGetPersonByUUID(t *testing.T) {
 	defer os.Remove(tmpfile.Name())
 	repo := dummyRepo{terms: []term{{CanonicalName: "Bob", RawID: "bob"}, {CanonicalName: "Fred", RawID: "fred"}}}
 	service := createTestPeopleService(t, &repo, tmpfile.Name())
-	defer service.shutdown()
+	defer service.Shutdown()
 	waitTillInit(t, service)
 
 	tests := []testSuiteForPeople{
@@ -65,8 +77,8 @@ func TestGetPersonByUUID(t *testing.T) {
 
 }
 
-func createTestPeopleService(t *testing.T, repo tmereader.Repository, cacheFileName string) peopleService {
-	service := newPeopleService(repo, "/base/url", "taxonomy_string", 1, cacheFileName)
+func createTestPeopleService(t *testing.T, repo tmereader.Repository, cacheFileName string) PeopleService {
+	service := NewPeopleService(repo, "/base/url", "taxonomy_string", 1, cacheFileName)
 	return service
 }
 
@@ -78,7 +90,7 @@ func getTempFile(t *testing.T) *os.File {
 	return tmpfile
 }
 
-func waitTillInit(t *testing.T, s peopleService) {
+func waitTillInit(t *testing.T, s PeopleService) {
 	for i := 1; i <= 1000; i++ {
 		if s.isInitialised() {
 			break
