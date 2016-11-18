@@ -1,5 +1,5 @@
 # V1 People Transformer
-[![CircleCI](https://circleci.com/gh/Financial-Times/v1-people-transformer.svg?style=svg)](https://circleci.com/gh/Financial-Times/v1-people-transformer) [![Go Report Card](https://goreportcard.com/badge/github.com/Financial-Times/v1-people-transformer)](https://goreportcard.com/report/github.com/Financial-Times/v1-people-transformer) [![Coverage Status](https://coveralls.io/repos/github/Financial-Times/v1-people-transformer/badge.svg?branch=master)](https://coveralls.io/github/Financial-Times/v1-people-transformer?branch=master) [![codecov](https://codecov.io/gh/Financial-Times/v1-people-transformer/branch/master/graph/badge.svg)](https://codecov.io/gh/Financial-Times/v1-people-transformer)
+[![CircleCI](https://circleci.com/gh/Financial-Times/v1-people-transformer.svg?style=svg)](https://circleci.com/gh/Financial-Times/v1-people-transformer) [![Go Report Card](https://goreportcard.com/badge/github.com/Financial-Times/v1-people-transformer)](https://goreportcard.com/report/github.com/Financial-Times/v1-people-transformer) [![Coverage Status](https://coveralls.io/repos/github/Financial-Times/v1-people-transformer/badge.svg?branch=master)](https://coveralls.io/github/Financial-Times/v1-people-transformer?branch=master) 
 
 An API for pulling in and transforming V1/TME People into the UPP representation of a Person 
 
