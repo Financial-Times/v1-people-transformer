@@ -164,7 +164,7 @@ func (s *peopleServiceImpl) processTerms(terms []interface{}, c chan []person) {
 
 func (s *peopleServiceImpl) processPeople(c chan []person) {
 	for people := range c {
-		log.Infof("Got people of: %v", people)
+		log.Infof("Processing batch of %v people", len(people))
 		err := s.db.Batch(func(tx *bolt.Tx) error {
 			bucket := tx.Bucket([]byte(cacheBucket))
 			if bucket == nil {
