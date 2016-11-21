@@ -60,7 +60,7 @@ func (h *PeopleHandler) HealthCheck() v1a.Check {
 
 func (h *PeopleHandler) G2GCheck() gtg.Status {
 	count, err := h.service.getCount()
-	if err == nil && count > 0 {
+	if h.service.isInitialised() && err == nil && count > 0 {
 		return gtg.Status{GoodToGo: true}
 	}
 	return gtg.Status{GoodToGo: false}
@@ -83,8 +83,13 @@ func (h *PeopleHandler) GetPersonByUUID(writer http.ResponseWriter, req *http.Re
 }
 
 func (h *PeopleHandler) Reload(writer http.ResponseWriter, req *http.Request) {
+	if !h.service.isInitialised() || !h.service.isDataLoaded() {
+		writeStatusServiceUnavailable(writer)
+		return
+	}
+
 	go func() {
-		if err := h.service.loadDB(); err != nil {
+		if err := h.service.reloadDB(); err != nil {
 			log.Errorf("ERROR opening db: %v", err.Error())
 		}
 	}()

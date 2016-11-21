@@ -131,8 +131,16 @@ func TestHandlers(t *testing.T) {
 			newRequest("GET", status.GTGPath),
 			&dummyService{
 				found:       false,
+				initialised: true},
+			http.StatusServiceUnavailable,
+			"application/json",
+			""},
+		{"GTG unavailable - get GTG count returns error",
+			newRequest("GET", status.GTGPath),
+			&dummyService{
+				found:       false,
 				initialised: true,
-				people:      []person{}},
+				err:         errors.New("Count error")},
 			http.StatusServiceUnavailable,
 			"application/json",
 			""},
@@ -141,8 +149,7 @@ func TestHandlers(t *testing.T) {
 			&dummyService{
 				found:       true,
 				initialised: true,
-				count:       2,
-				people:      []person{}},
+				count:       2},
 			http.StatusOK,
 			"application/json",
 			"OK"},
@@ -166,10 +173,8 @@ func TestHandlers(t *testing.T) {
 			newRequest("POST", "/transformers/people/__reload"),
 			&dummyService{
 				wg:          &wg,
-				found:       true,
 				initialised: true,
-				count:       2,
-				people:      []person{}},
+				dataLoaded:  true},
 			http.StatusAccepted,
 			"application/json",
 			"{\"message\": \"Reloading people\"}\n"},
@@ -178,13 +183,31 @@ func TestHandlers(t *testing.T) {
 			&dummyService{
 				wg:          &wg,
 				err:         errors.New("Boom goes the backend..."),
-				found:       true,
 				initialised: true,
-				count:       2,
-				people:      []person{}},
+				dataLoaded:  true},
 			http.StatusAccepted,
 			"application/json",
 			"{\"message\": \"Reloading people\"}\n"},
+		{"Reload - Service unavailable as not initialised",
+			newRequest("POST", "/transformers/people/__reload"),
+			&dummyService{
+				wg:          &wg,
+				err:         errors.New("Boom goes the backend..."),
+				initialised: false,
+				dataLoaded:  true},
+			http.StatusServiceUnavailable,
+			"application/json",
+			"{\"message\": \"Service Unavailable\"}\n"},
+		{"Reload - Service unavailable as data not loaded",
+			newRequest("POST", "/transformers/people/__reload"),
+			&dummyService{
+				wg:          &wg,
+				err:         errors.New("Boom goes the backend..."),
+				initialised: true,
+				dataLoaded:  false},
+			http.StatusServiceUnavailable,
+			"application/json",
+			"{\"message\": \"Service Unavailable\"}\n"},
 	}
 	for _, test := range tests {
 		wg.Add(1)
@@ -212,6 +235,7 @@ func TestReloadIsCalled(t *testing.T) {
 		wg:          &wg,
 		found:       true,
 		initialised: true,
+		dataLoaded:  true,
 		count:       2,
 		people:      []person{}}
 	log.Infof("s.loadDBCalled: %v", s.loadDBCalled)
@@ -232,6 +256,7 @@ type dummyService struct {
 	found        bool
 	people       []person
 	initialised  bool
+	dataLoaded   bool
 	count        int
 	err          error
 	loadDBCalled bool
@@ -258,11 +283,15 @@ func (s *dummyService) isInitialised() bool {
 	return s.initialised
 }
 
+func (s *dummyService) isDataLoaded() bool {
+	return s.dataLoaded
+}
+
 func (s *dummyService) Shutdown() error {
 	return s.err
 }
 
-func (s *dummyService) loadDB() error {
+func (s *dummyService) reloadDB() error {
 	defer s.wg.Done()
 	s.loadDBCalled = true
 	return s.err
