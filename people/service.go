@@ -23,6 +23,7 @@ type PeopleService interface {
 	getPersonByUUID(uuid string) (person, bool, error)
 	getCount() (int, error)
 	isInitialised() bool
+	loadDB() error
 	Shutdown() error
 }
 
@@ -112,22 +113,33 @@ func (s *peopleServiceImpl) getPersonByUUID(uuid string) (person, bool, error) {
 
 }
 
+func (s *peopleServiceImpl) openDB() error {
+	if s.db == nil {
+		var err error
+		if s.db, err = bolt.Open(s.cacheFileName, 0600, &bolt.Options{Timeout: 1 * time.Second}); err != nil {
+			log.Errorf("ERROR opening cache file for init: %v", err.Error())
+			return err
+		}
+	}
+	return s.createCacheBucket()
+}
+
 func (s *peopleServiceImpl) loadDB() error {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	log.Info("Loading DB...")
 	c := make(chan []person)
-	go s.processPeople(c)
+	go s.processPeople(c, &wg)
 	s.Lock()
-	defer func() {
+	s.initialised = false
+	defer func(w *sync.WaitGroup) {
 		close(c)
+		w.Wait()
 		s.initialised = true
 		s.Unlock()
-	}()
-	var err error
-	s.db, err = bolt.Open(s.cacheFileName, 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		log.Errorf("ERROR opening cache file for init: %v", err.Error())
-		return err
-	}
-	if err = s.createCacheBucket(); err != nil {
+	}(&wg)
+
+	if err := s.openDB(); err != nil {
 		return err
 	}
 
@@ -149,7 +161,7 @@ func (s *peopleServiceImpl) loadDB() error {
 	return nil
 }
 
-func (s *peopleServiceImpl) processTerms(terms []interface{}, c chan []person) {
+func (s *peopleServiceImpl) processTerms(terms []interface{}, c chan<- []person) {
 	log.Info("Processing terms...")
 	var cacheToBeWritten []person
 	for _, iTerm := range terms {
@@ -162,10 +174,10 @@ func (s *peopleServiceImpl) processTerms(terms []interface{}, c chan []person) {
 	c <- cacheToBeWritten
 }
 
-func (s *peopleServiceImpl) processPeople(c chan []person) {
+func (s *peopleServiceImpl) processPeople(c <-chan []person, wg *sync.WaitGroup) {
 	for people := range c {
 		log.Infof("Processing batch of %v people", len(people))
-		err := s.db.Batch(func(tx *bolt.Tx) error {
+		if err := s.db.Batch(func(tx *bolt.Tx) error {
 			bucket := tx.Bucket([]byte(cacheBucket))
 			if bucket == nil {
 				return fmt.Errorf("Cache bucket [%v] not found!", cacheBucket)
@@ -181,22 +193,22 @@ func (s *peopleServiceImpl) processPeople(c chan []person) {
 				}
 			}
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
 			log.Errorf("ERROR storing to cache: %+v", err)
 		}
 	}
 
 	log.Info("Finished processing all people")
+	wg.Done()
 }
 
 func (s *peopleServiceImpl) createCacheBucket() error {
 	return s.db.Update(func(tx *bolt.Tx) error {
-		err := tx.DeleteBucket([]byte(cacheBucket))
-		if err != nil {
+		log.Infof("Creating bucket '%s'", cacheBucket)
+		if err := tx.DeleteBucket([]byte(cacheBucket)); err != nil {
 			log.Warnf("Cache bucket [%v] could not be deleted\n", cacheBucket)
 		}
-		_, err = tx.CreateBucket([]byte(cacheBucket))
+		_, err := tx.CreateBucket([]byte(cacheBucket))
 		return err
 	})
 }
