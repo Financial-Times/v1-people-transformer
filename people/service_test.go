@@ -47,9 +47,24 @@ func TestGetCount(t *testing.T) {
 	service := createTestPeopleService(t, &repo, tmpfile.Name())
 	defer service.Shutdown()
 	waitTillInit(t, service)
-	count, err := service.getCount()
-	assert.NoError(t, err)
-	assert.Equal(t, 2, count)
+	assertCount(t, service, 2)
+}
+
+func TestReload(t *testing.T) {
+	tmpfile := getTempFile(t)
+	defer os.Remove(tmpfile.Name())
+	repo := dummyRepo{terms: []term{{CanonicalName: "Bob", RawID: "bob"}, {CanonicalName: "Fred", RawID: "fred"}}}
+	service := createTestPeopleService(t, &repo, tmpfile.Name())
+	defer service.Shutdown()
+	waitTillInit(t, service)
+	assertCount(t, service, 2)
+	repo.terms = append(repo.terms, term{CanonicalName: "Third", RawID: "third"})
+	repo.count = 0
+	assert.NoError(t, service.loadDB())
+	waitTillInit(t, service)
+
+	//waitTillInit(t, service)
+	assertCount(t, service, 3)
 }
 
 func TestGetPersonByUUID(t *testing.T) {
@@ -77,6 +92,12 @@ func TestGetPersonByUUID(t *testing.T) {
 
 }
 
+func assertCount(t *testing.T, s PeopleService, expected int) {
+	count, err := s.getCount()
+	assert.NoError(t, err)
+	assert.Equal(t, expected, count)
+}
+
 func createTestPeopleService(t *testing.T, repo tmereader.Repository, cacheFileName string) PeopleService {
 	service := NewPeopleService(repo, "/base/url", "taxonomy_string", 1, cacheFileName)
 	return service
@@ -93,6 +114,7 @@ func getTempFile(t *testing.T) *os.File {
 func waitTillInit(t *testing.T, s PeopleService) {
 	for i := 1; i <= 1000; i++ {
 		if s.isInitialised() {
+			log.Info("isInitialised was true")
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -111,6 +133,7 @@ func (d *dummyRepo) GetTmeTermsFromIndex(startRecord int) ([]interface{}, error)
 		d.count++
 	}()
 	if len(d.terms) == d.count {
+		log.Infof("len(d.terms):%v == d.count:%v", len(d.terms), d.count)
 		return nil, d.err
 	}
 	return []interface{}{d.terms[d.count]}, d.err

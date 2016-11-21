@@ -127,6 +127,7 @@ func router(handler people.PeopleHandler) http.Handler {
 	servicesRouter.HandleFunc("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}", handler.GetPersonByUUID).Methods("GET")
 	servicesRouter.HandleFunc("/transformers/people/__count", handler.GetCount).Methods("GET")
 	servicesRouter.HandleFunc("/transformers/people/__ids", handler.GetPeople).Methods("GET")
+	servicesRouter.HandleFunc("/transformers/people/__reload", handler.Reload).Methods("POST")
 
 	return servicesRouter
 }

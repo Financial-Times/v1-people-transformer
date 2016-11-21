@@ -82,6 +82,15 @@ func (h *PeopleHandler) GetPersonByUUID(writer http.ResponseWriter, req *http.Re
 	writeJSONResponse(obj, found, writer)
 }
 
+func (h *PeopleHandler) Reload(writer http.ResponseWriter, req *http.Request) {
+	go func() {
+		if err := h.service.loadDB(); err != nil {
+			log.Errorf("ERROR opening db: %v", err.Error())
+		}
+	}()
+	writeJSONMessageWithStatus(writer, "Reloading people", http.StatusAccepted)
+}
+
 func writeJSONResponse(obj interface{}, found bool, writer http.ResponseWriter) {
 	writer.Header().Add("Content-Type", "application/json")
 
