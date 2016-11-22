@@ -162,6 +162,7 @@ func (s *peopleServiceImpl) openDB() error {
 }
 
 func (s *peopleServiceImpl) reloadDB() error {
+	s.setDataLoaded(false)
 	return s.loadDB()
 }
 
