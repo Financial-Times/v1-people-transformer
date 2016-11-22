@@ -23,7 +23,8 @@ type PeopleService interface {
 	getPersonByUUID(uuid string) (person, bool, error)
 	getCount() (int, error)
 	isInitialised() bool
-	loadDB() error
+	isDataLoaded() bool
+	reloadDB() error
 	Shutdown() error
 }
 
@@ -35,12 +36,13 @@ type peopleServiceImpl struct {
 	taxonomyName  string
 	maxTmeRecords int
 	initialised   bool
+	dataLoaded    bool
 	cacheFileName string
 	db            *bolt.DB
 }
 
 func NewPeopleService(repo tmereader.Repository, baseURL string, taxonomyName string, maxTmeRecords int, cacheFileName string) PeopleService {
-	s := &peopleServiceImpl{repository: repo, baseURL: baseURL, taxonomyName: taxonomyName, maxTmeRecords: maxTmeRecords, initialised: false, cacheFileName: cacheFileName}
+	s := &peopleServiceImpl{repository: repo, baseURL: baseURL, taxonomyName: taxonomyName, maxTmeRecords: maxTmeRecords, initialised: true, cacheFileName: cacheFileName}
 	go func(service *peopleServiceImpl) {
 		err := service.loadDB()
 		if err != nil {
@@ -56,8 +58,30 @@ func (s *peopleServiceImpl) isInitialised() bool {
 	return s.initialised
 }
 
+func (s *peopleServiceImpl) setInitialised(val bool) {
+	s.Lock()
+	s.initialised = val
+	s.Unlock()
+}
+
+func (s *peopleServiceImpl) isDataLoaded() bool {
+	s.RLock()
+	defer s.RUnlock()
+	return s.dataLoaded
+}
+
+func (s *peopleServiceImpl) setDataLoaded(val bool) {
+	s.Lock()
+	s.dataLoaded = val
+	s.Unlock()
+}
+
 func (s *peopleServiceImpl) Shutdown() error {
-	log.Info("Shutingdown...")
+	log.Info("Shuting down...")
+	s.Lock()
+	defer s.Unlock()
+	s.initialised = false
+	s.dataLoaded = false
 	if s.db == nil {
 		return errors.New("DB not open")
 	}
@@ -65,6 +89,12 @@ func (s *peopleServiceImpl) Shutdown() error {
 }
 
 func (s *peopleServiceImpl) getCount() (int, error) {
+	s.RLock()
+	defer s.RUnlock()
+	if !s.isDataLoaded() {
+		return 0, nil
+	}
+
 	var count int
 	err := s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(cacheBucket))
@@ -78,6 +108,8 @@ func (s *peopleServiceImpl) getCount() (int, error) {
 }
 
 func (s *peopleServiceImpl) getPeople() ([]personLink, bool) {
+	s.RLock()
+	defer s.RUnlock()
 	if len(s.personLinks) > 0 {
 		return s.personLinks, true
 	}
@@ -85,6 +117,8 @@ func (s *peopleServiceImpl) getPeople() ([]personLink, bool) {
 }
 
 func (s *peopleServiceImpl) getPersonByUUID(uuid string) (person, bool, error) {
+	s.RLock()
+	defer s.RUnlock()
 	var cachedValue []byte
 	err := s.db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(cacheBucket))
@@ -100,13 +134,13 @@ func (s *peopleServiceImpl) getPersonByUUID(uuid string) (person, bool, error) {
 		return person{}, false, err
 	}
 	if len(cachedValue) == 0 {
-		log.Infof("INFO No cached value for [%v]", uuid)
+		log.Infof("INFO No cached value for [%v].", uuid)
 		return person{}, false, nil
 	}
 	var cachedPerson person
 	err = json.Unmarshal(cachedValue, &cachedPerson)
 	if err != nil {
-		log.Errorf("ERROR unmarshalling cached value for [%v]: %v", uuid, err.Error())
+		log.Errorf("ERROR unmarshalling cached value for [%v]: %v.", uuid, err.Error())
 		return person{}, true, err
 	}
 	return cachedPerson, true, nil
@@ -114,32 +148,35 @@ func (s *peopleServiceImpl) getPersonByUUID(uuid string) (person, bool, error) {
 }
 
 func (s *peopleServiceImpl) openDB() error {
+	s.Lock()
+	defer s.Unlock()
+	log.Infof("Opening database '%v'.", s.cacheFileName)
 	if s.db == nil {
 		var err error
 		if s.db, err = bolt.Open(s.cacheFileName, 0600, &bolt.Options{Timeout: 1 * time.Second}); err != nil {
-			log.Errorf("ERROR opening cache file for init: %v", err.Error())
+			log.Errorf("ERROR opening cache file for init: %v.", err.Error())
 			return err
 		}
 	}
 	return s.createCacheBucket()
 }
 
+func (s *peopleServiceImpl) reloadDB() error {
+	return s.loadDB()
+}
+
 func (s *peopleServiceImpl) loadDB() error {
 	var wg sync.WaitGroup
-	wg.Add(1)
 	log.Info("Loading DB...")
 	c := make(chan []person)
 	go s.processPeople(c, &wg)
-	s.Lock()
-	s.initialised = false
 	defer func(w *sync.WaitGroup) {
 		close(c)
 		w.Wait()
-		s.initialised = true
-		s.Unlock()
 	}(&wg)
 
 	if err := s.openDB(); err != nil {
+		s.setInitialised(false)
 		return err
 	}
 
@@ -150,11 +187,11 @@ func (s *peopleServiceImpl) loadDB() error {
 			return err
 		}
 		if len(terms) < 1 {
-			log.Info("Finished fetching people from TME. Waiting subroutines to terminate")
+			log.Info("Finished fetching people from TME. Waiting subroutines to terminate.")
 			break
 		}
 
-		log.Infof("Terms length is: %v", len(terms))
+		wg.Add(1)
 		s.processTerms(terms, c)
 		responseCount += s.maxTmeRecords
 	}
@@ -176,7 +213,7 @@ func (s *peopleServiceImpl) processTerms(terms []interface{}, c chan<- []person)
 
 func (s *peopleServiceImpl) processPeople(c <-chan []person, wg *sync.WaitGroup) {
 	for people := range c {
-		log.Infof("Processing batch of %v people", len(people))
+		log.Infof("Processing batch of %v people.", len(people))
 		if err := s.db.Batch(func(tx *bolt.Tx) error {
 			bucket := tx.Bucket([]byte(cacheBucket))
 			if bucket == nil {
@@ -194,20 +231,26 @@ func (s *peopleServiceImpl) processPeople(c <-chan []person, wg *sync.WaitGroup)
 			}
 			return nil
 		}); err != nil {
-			log.Errorf("ERROR storing to cache: %+v", err)
+			log.Errorf("ERROR storing to cache: %+v.", err)
 		}
+		wg.Done()
 	}
 
-	log.Info("Finished processing all people")
-	wg.Done()
+	log.Info("Finished processing all people.")
+	if s.isInitialised() {
+		s.setDataLoaded(true)
+	}
 }
 
 func (s *peopleServiceImpl) createCacheBucket() error {
 	return s.db.Update(func(tx *bolt.Tx) error {
-		log.Infof("Creating bucket '%s'", cacheBucket)
-		if err := tx.DeleteBucket([]byte(cacheBucket)); err != nil {
-			log.Warnf("Cache bucket [%v] could not be deleted\n", cacheBucket)
+		if tx.Bucket([]byte(cacheBucket)) != nil {
+			log.Infof("Deleting bucket '%v'.", cacheBucket)
+			if err := tx.DeleteBucket([]byte(cacheBucket)); err != nil {
+				log.Warnf("Cache bucket [%v] could not be deleted.", cacheBucket)
+			}
 		}
+		log.Infof("Creating bucket '%s'.", cacheBucket)
 		_, err := tx.CreateBucket([]byte(cacheBucket))
 		return err
 	})
