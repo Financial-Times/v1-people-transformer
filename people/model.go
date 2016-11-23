@@ -16,3 +16,7 @@ type alternativeIdentifiers struct {
 type personLink struct {
 	APIURL string `json:"apiUrl"`
 }
+
+type personUUID struct {
+	UUID string `json:"ID"`
+}

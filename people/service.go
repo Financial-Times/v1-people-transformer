@@ -7,7 +7,7 @@ import (
 	"github.com/Financial-Times/tme-reader/tmereader"
 	log "github.com/Sirupsen/logrus"
 	"github.com/boltdb/bolt"
-	"github.com/pborman/uuid"
+	"io"
 	"sync"
 	"time"
 )
@@ -19,7 +19,9 @@ const (
 )
 
 type PeopleService interface {
-	getPeople() ([]personLink, bool)
+	getPeople() (io.PipeReader, error)
+	getPeopleLinks() (io.PipeReader, error)
+	getPeopleUUIDs() (io.PipeReader, error)
 	getPersonByUUID(uuid string) (person, bool, error)
 	getCount() (int, error)
 	isInitialised() bool
@@ -32,7 +34,6 @@ type peopleServiceImpl struct {
 	sync.RWMutex
 	repository    tmereader.Repository
 	baseURL       string
-	personLinks   []personLink
 	taxonomyName  string
 	maxTmeRecords int
 	initialised   bool
@@ -107,13 +108,89 @@ func (s *peopleServiceImpl) getCount() (int, error) {
 	return count, err
 }
 
-func (s *peopleServiceImpl) getPeople() ([]personLink, bool) {
+func (s *peopleServiceImpl) getPeople() (io.PipeReader, error) {
 	s.RLock()
-	defer s.RUnlock()
-	if len(s.personLinks) > 0 {
-		return s.personLinks, true
-	}
-	return s.personLinks, false
+	pv, pw := io.Pipe()
+	go func() {
+		defer s.RUnlock()
+		defer pw.Close()
+		s.db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(cacheBucket))
+			c := b.Cursor()
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				if _, err := pw.Write(v); err != nil {
+					return err
+				}
+				io.WriteString(pw, "\n")
+			}
+			return nil
+		})
+	}()
+	return *pv, nil
+}
+
+func (s *peopleServiceImpl) getPeopleLinks() (io.PipeReader, error) {
+	s.RLock()
+	pv, pw := io.Pipe()
+	go func() {
+		defer s.RUnlock()
+		defer pw.Close()
+		io.WriteString(pw, "[")
+		s.db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(cacheBucket))
+			c := b.Cursor()
+			encoder := json.NewEncoder(pw)
+			var k []byte
+			k, _ = c.First()
+			for {
+				if k == nil {
+					break
+				}
+				pl := personLink{APIURL: s.baseURL + "/" + string(k[:])}
+				if err := encoder.Encode(pl); err != nil {
+					return err
+				}
+				if k, _ = c.Next(); k != nil {
+					io.WriteString(pw, ",")
+				}
+			}
+			return nil
+		})
+		io.WriteString(pw, "]")
+	}()
+	return *pv, nil
+}
+
+func (s *peopleServiceImpl) getPeopleUUIDs() (io.PipeReader, error) {
+	s.RLock()
+	pv, pw := io.Pipe()
+	go func() {
+		defer s.RUnlock()
+		defer pw.Close()
+		io.WriteString(pw, "[")
+		s.db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(cacheBucket))
+			c := b.Cursor()
+			encoder := json.NewEncoder(pw)
+			var k []byte
+			k, _ = c.First()
+			for {
+				if k == nil {
+					break
+				}
+				pl := personUUID{UUID: string(k[:])}
+				if err := encoder.Encode(pl); err != nil {
+					return err
+				}
+				if k, _ = c.Next(); k != nil {
+					io.WriteString(pw, ",")
+				}
+			}
+			return nil
+		})
+		io.WriteString(pw, "]")
+	}()
+	return *pv, nil
 }
 
 func (s *peopleServiceImpl) getPersonByUUID(uuid string) (person, bool, error) {
@@ -137,14 +214,13 @@ func (s *peopleServiceImpl) getPersonByUUID(uuid string) (person, bool, error) {
 		log.Infof("INFO No cached value for [%v].", uuid)
 		return person{}, false, nil
 	}
+
 	var cachedPerson person
-	err = json.Unmarshal(cachedValue, &cachedPerson)
-	if err != nil {
+	if err := json.Unmarshal(cachedValue, &cachedPerson); err != nil {
 		log.Errorf("ERROR unmarshalling cached value for [%v]: %v.", uuid, err.Error())
 		return person{}, true, err
 	}
 	return cachedPerson, true, nil
-
 }
 
 func (s *peopleServiceImpl) openDB() error {
@@ -204,9 +280,6 @@ func (s *peopleServiceImpl) processTerms(terms []interface{}, c chan<- []person)
 	var cacheToBeWritten []person
 	for _, iTerm := range terms {
 		t := iTerm.(term)
-		tmeIdentifier := buildTmeIdentifier(t.RawID, s.taxonomyName)
-		personUUID := uuid.NewMD5(uuid.UUID{}, []byte(tmeIdentifier)).String()
-		s.personLinks = append(s.personLinks, personLink{APIURL: s.baseURL + "/" + personUUID})
 		cacheToBeWritten = append(cacheToBeWritten, transformPerson(t, s.taxonomyName))
 	}
 	c <- cacheToBeWritten

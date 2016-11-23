@@ -8,6 +8,7 @@ import (
 	"github.com/Financial-Times/service-status-go/gtg"
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
+	"io"
 	"net/http"
 )
 
@@ -20,15 +21,53 @@ func NewPeopleHandler(service PeopleService) PeopleHandler {
 }
 
 func (h *PeopleHandler) GetPeople(writer http.ResponseWriter, req *http.Request) {
+	writer.Header().Add("Content-Type", "application/json")
 	if !h.service.isInitialised() {
 		writeStatusServiceUnavailable(writer)
 		return
 	}
-	obj, found := h.service.getPeople()
-	writeJSONResponse(obj, found, writer)
+
+	if c, _ := h.service.getCount(); c == 0 {
+		writeJSONMessageWithStatus(writer, "People not found", http.StatusNotFound)
+		return
+	}
+
+	pv, err := h.service.getPeople()
+
+	if err != nil {
+		writeJSONMessageWithStatus(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer pv.Close()
+	writer.WriteHeader(http.StatusOK)
+	io.Copy(writer, &pv)
+}
+
+func (h *PeopleHandler) GetPeopleUUIDs(writer http.ResponseWriter, req *http.Request) {
+	writer.Header().Add("Content-Type", "application/json")
+	if !h.service.isInitialised() {
+		writeStatusServiceUnavailable(writer)
+		return
+	}
+
+	if c, _ := h.service.getCount(); c == 0 {
+		writeJSONMessageWithStatus(writer, "People not found", http.StatusNotFound)
+		return
+	}
+
+	pv, err := h.service.getPeopleUUIDs()
+
+	if err != nil {
+		writeJSONMessageWithStatus(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer pv.Close()
+	writer.WriteHeader(http.StatusOK)
+	io.Copy(writer, &pv)
 }
 
 func (h *PeopleHandler) GetCount(writer http.ResponseWriter, req *http.Request) {
+	writer.Header().Add("Content-Type", "application/json")
 	if !h.service.isInitialised() {
 		writeStatusServiceUnavailable(writer)
 		return
@@ -67,6 +106,7 @@ func (h *PeopleHandler) G2GCheck() gtg.Status {
 }
 
 func (h *PeopleHandler) GetPersonByUUID(writer http.ResponseWriter, req *http.Request) {
+	writer.Header().Add("Content-Type", "application/json")
 	if !h.service.isInitialised() {
 		writeStatusServiceUnavailable(writer)
 		return
@@ -97,8 +137,6 @@ func (h *PeopleHandler) Reload(writer http.ResponseWriter, req *http.Request) {
 }
 
 func writeJSONResponse(obj interface{}, found bool, writer http.ResponseWriter) {
-	writer.Header().Add("Content-Type", "application/json")
-
 	if !found {
 		writeJSONMessageWithStatus(writer, "Person not found", http.StatusNotFound)
 		return
