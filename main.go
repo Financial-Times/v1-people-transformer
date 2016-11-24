@@ -120,8 +120,7 @@ func main() {
 			*cacheFileName)
 		defer s.Shutdown()
 		handler := people.NewPeopleHandler(s)
-		r := router(handler)
-		http.Handle("/", r)
+		router(handler)
 
 		log.Printf("listening on %d", *port)
 		err := http.ListenAndServe(fmt.Sprintf(":%d", *port), nil)
@@ -132,14 +131,14 @@ func main() {
 	app.Run(os.Args)
 }
 
-func router(handler people.PeopleHandler) http.Handler {
+func router(handler people.PeopleHandler) {
 	servicesRouter := mux.NewRouter()
 
-	servicesRouter.HandleFunc("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}", handler.GetPersonByUUID).Methods("GET")
 	servicesRouter.HandleFunc("/transformers/people", handler.GetPeople).Methods("GET")
 	servicesRouter.HandleFunc("/transformers/people/__count", handler.GetCount).Methods("GET")
 	servicesRouter.HandleFunc("/transformers/people/__ids", handler.GetPeopleUUIDs).Methods("GET")
 	servicesRouter.HandleFunc("/transformers/people/__reload", handler.Reload).Methods("POST")
+	servicesRouter.HandleFunc("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}", handler.GetPersonByUUID).Methods("GET")
 
 	var monitoringRouter http.Handler = servicesRouter
 	monitoringRouter = httphandlers.TransactionAwareRequestLoggingHandler(log.StandardLogger(), monitoringRouter)
@@ -155,8 +154,6 @@ func router(handler people.PeopleHandler) http.Handler {
 	g2gHandler := status.NewGoodToGoHandler(gtg.StatusChecker(handler.G2GCheck))
 	http.HandleFunc(status.GTGPath, g2gHandler)
 	http.Handle("/", monitoringRouter)
-
-	return monitoringRouter
 }
 
 func getResilientClient() *pester.Client {
