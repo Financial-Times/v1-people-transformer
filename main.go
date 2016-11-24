@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/Financial-Times/base-ft-rw-app-go/baseftrwapp"
 	"github.com/Financial-Times/go-fthealth/v1a"
+	"github.com/Financial-Times/http-handlers-go/httphandlers"
 	"github.com/Financial-Times/service-status-go/gtg"
 	status "github.com/Financial-Times/service-status-go/httphandlers"
 	"github.com/Financial-Times/tme-reader/tmereader"
@@ -10,6 +12,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
 	"github.com/jawher/mow.cli"
+	"github.com/rcrowley/go-metrics"
 	"github.com/sethgrid/pester"
 	"net"
 	"net/http"
@@ -74,10 +77,29 @@ func main() {
 		Desc:   "Cache file name",
 		EnvVar: "CACHE_FILE_NAME",
 	})
+	graphiteTCPAddress := app.String(cli.StringOpt{
+		Name:   "graphiteTCPAddress",
+		Value:  "",
+		Desc:   "Graphite TCP address, e.g. graphite.ft.com:2003. Leave as default if you do NOT want to output to graphite (e.g. if running locally)",
+		EnvVar: "GRAPHITE_ADDRESS",
+	})
+	graphitePrefix := app.String(cli.StringOpt{
+		Name:   "graphitePrefix",
+		Value:  "",
+		Desc:   "Prefix to use. Should start with content, include the environment, and the host name. e.g. content.test.public.content.by.concept.api.ftaps59382-law1a-eu-t",
+		EnvVar: "GRAPHITE_PREFIX",
+	})
+	logMetrics := app.Bool(cli.BoolOpt{
+		Name:   "logMetrics",
+		Value:  false,
+		Desc:   "Whether to log metrics. Set to true if running locally and you want metrics output",
+		EnvVar: "LOG_METRICS",
+	})
 
 	tmeTaxonomyName := "PN"
 
 	app.Action = func() {
+		baseftrwapp.OutputMetricsIfRequired(*graphiteTCPAddress, *graphitePrefix, *logMetrics)
 		client := getResilientClient()
 		modelTransformer := new(people.PersonTransformer)
 		s := people.NewPeopleService(
@@ -112,17 +134,6 @@ func main() {
 
 func router(handler people.PeopleHandler) http.Handler {
 	servicesRouter := mux.NewRouter()
-	// The top one of these feels more correct, but the lower one matches what we have in Dropwizard,
-	// so it's what apps expect currently same as ping
-	servicesRouter.HandleFunc(status.PingPath, status.PingHandler)
-	servicesRouter.HandleFunc(status.PingPathDW, status.PingHandler)
-	servicesRouter.HandleFunc(status.BuildInfoPath, status.BuildInfoHandler)
-	servicesRouter.HandleFunc(status.BuildInfoPathDW, status.BuildInfoHandler)
-
-	servicesRouter.HandleFunc("/__health", v1a.Handler("V1 People Transformer Healthchecks", "Checks for the health of the service", handler.HealthCheck()))
-
-	g2gHandler := status.NewGoodToGoHandler(gtg.StatusChecker(handler.G2GCheck))
-	servicesRouter.HandleFunc(status.GTGPath, g2gHandler)
 
 	servicesRouter.HandleFunc("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}", handler.GetPersonByUUID).Methods("GET")
 	servicesRouter.HandleFunc("/transformers/people", handler.GetPeople).Methods("GET")
@@ -130,7 +141,22 @@ func router(handler people.PeopleHandler) http.Handler {
 	servicesRouter.HandleFunc("/transformers/people/__ids", handler.GetPeopleUUIDs).Methods("GET")
 	servicesRouter.HandleFunc("/transformers/people/__reload", handler.Reload).Methods("POST")
 
-	return servicesRouter
+	var monitoringRouter http.Handler = servicesRouter
+	monitoringRouter = httphandlers.TransactionAwareRequestLoggingHandler(log.StandardLogger(), monitoringRouter)
+	monitoringRouter = httphandlers.HTTPMetricsHandler(metrics.DefaultRegistry, monitoringRouter)
+
+	http.HandleFunc(status.PingPath, status.PingHandler)
+	http.HandleFunc(status.PingPathDW, status.PingHandler)
+	http.HandleFunc(status.BuildInfoPath, status.BuildInfoHandler)
+	http.HandleFunc(status.BuildInfoPathDW, status.BuildInfoHandler)
+
+	http.HandleFunc("/__health", v1a.Handler("V1 People Transformer Healthchecks", "Checks for the health of the service", handler.HealthCheck()))
+
+	g2gHandler := status.NewGoodToGoHandler(gtg.StatusChecker(handler.G2GCheck))
+	http.HandleFunc(status.GTGPath, g2gHandler)
+	http.Handle("/", monitoringRouter)
+
+	return monitoringRouter
 }
 
 func getResilientClient() *pester.Client {
