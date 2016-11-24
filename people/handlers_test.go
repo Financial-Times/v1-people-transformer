@@ -1,6 +1,7 @@
 package people
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Financial-Times/go-fthealth/v1a"
@@ -9,6 +10,8 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -18,8 +21,13 @@ import (
 )
 
 const (
-	testUUID                = "bba39990-c78d-3629-ae83-808c333c6dbc"
-	getPeopleResponse       = "[{\"apiUrl\":\"http://localhost:8080/transformers/people/bba39990-c78d-3629-ae83-808c333c6dbc\"}]\n"
+	testUUID          = "bba39990-c78d-3629-ae83-808c333c6dbc"
+	testUUID2         = "be2e7e2b-0fa2-3969-a69b-74c46e754032"
+	getPeopleResponse = `{"uuid":"bba39990-c78d-3629-ae83-808c333c6dbc","prefLabel":"","type":"","alternativeIdentifiers":{}}
+{"uuid":"be2e7e2b-0fa2-3969-a69b-74c46e754032","prefLabel":"","type":"","alternativeIdentifiers":{}}
+`
+	getPeopleLinkResponse   = "[{\"apiUrl\":\"http://localhost:8080/transformers/people/bba39990-c78d-3629-ae83-808c333c6dbc\"}]"
+	getPeopleByUUIDResponse = "[{\"ID\":\"bba39990-c78d-3629-ae83-808c333c6dbc\"}]"
 	getPersonByUUIDResponse = "{\"uuid\":\"bba39990-c78d-3629-ae83-808c333c6dbc\",\"prefLabel\":\"European Union\",\"type\":\"Organisation\",\"alternativeIdentifiers\":{\"TME\":[\"MTE3-U3ViamVjdHM=\"],\"uuids\":[\"bba39990-c78d-3629-ae83-808c333c6dbc\"]}}\n"
 )
 
@@ -60,15 +68,6 @@ func TestHandlers(t *testing.T) {
 			http.StatusServiceUnavailable,
 			"application/json",
 			"{\"message\": \"Service Unavailable\"}\n"},
-		{"Success - get people",
-			newRequest("GET", "/transformers/people"),
-			&dummyService{
-				found:       true,
-				initialised: true,
-				people:      []person{{UUID: testUUID}}},
-			http.StatusOK,
-			"application/json",
-			getPeopleResponse},
 		{"Success - get people count",
 			newRequest("GET", "/transformers/people/__count"),
 			&dummyService{
@@ -100,17 +99,55 @@ func TestHandlers(t *testing.T) {
 				people:      []person{{UUID: testUUID}}},
 			http.StatusServiceUnavailable,
 			"application/json", "{\"message\": \"Service Unavailable\"}\n"},
-		{"Not found - get people",
+		{"get people - success",
 			newRequest("GET", "/transformers/people"),
 			&dummyService{
-				found:       false,
+				found:       true,
 				initialised: true,
+				count:       2,
+				people:      []person{{UUID: testUUID}, {UUID: testUUID2}}},
+			http.StatusOK,
+			"application/json",
+			getPeopleResponse},
+		{"get people - Not found",
+			newRequest("GET", "/transformers/people"),
+			&dummyService{
+				initialised: true,
+				count:       0,
 				people:      []person{}},
 			http.StatusNotFound,
 			"application/json",
-			"{\"message\": \"Person not found\"}\n"},
-		{"Service unavailable - get people",
+			"{\"message\": \"People not found\"}\n"},
+		{"get people - Service unavailable",
 			newRequest("GET", "/transformers/people"),
+			&dummyService{
+				found:       false,
+				initialised: false,
+				people:      []person{}},
+			http.StatusServiceUnavailable,
+			"application/json",
+			"{\"message\": \"Service Unavailable\"}\n"},
+		{"get people IDS - Success",
+			newRequest("GET", "/transformers/people/__id"),
+			&dummyService{
+				found:       true,
+				initialised: true,
+				count:       1,
+				people:      []person{{UUID: testUUID}}},
+			http.StatusOK,
+			"application/json",
+			getPeopleByUUIDResponse},
+		{"get people IDS - Not found",
+			newRequest("GET", "/transformers/people/__id"),
+			&dummyService{
+				initialised: true,
+				count:       0,
+				people:      []person{}},
+			http.StatusNotFound,
+			"application/json",
+			"{\"message\": \"People not found\"}\n"},
+		{"get people IDS - Service unavailable",
+			newRequest("GET", "/transformers/people/__id"),
 			&dummyService{
 				found:       false,
 				initialised: false,
@@ -215,14 +252,16 @@ func TestHandlers(t *testing.T) {
 		router(test.dummyService).ServeHTTP(rec, test.req)
 		assert.Equal(t, test.statusCode, rec.Code, fmt.Sprintf("%s: Wrong response code, was %d, should be %d", test.name, rec.Code, test.statusCode))
 
+		b, err := ioutil.ReadAll(rec.Body)
+		assert.NoError(t, err)
+		body := string(b)
 		if strings.HasPrefix(test.body, "regex=") {
 			regex := strings.TrimPrefix(test.body, "regex=")
-			body := rec.Body.String()
 			matched, err := regexp.MatchString(regex, body)
 			assert.NoError(t, err)
 			assert.True(t, matched, fmt.Sprintf("Could not match regex:\n %s \nin body:\n %s", regex, body))
 		} else {
-			assert.Equal(t, test.body, rec.Body.String(), fmt.Sprintf("%s: Wrong body", test.name))
+			assert.Equal(t, test.body, body, fmt.Sprintf("%s: Wrong body", test.name))
 		}
 	}
 }
@@ -263,12 +302,46 @@ type dummyService struct {
 	wg           *sync.WaitGroup
 }
 
-func (s *dummyService) getPeople() ([]personLink, bool) {
-	var links []personLink
-	for _, sub := range s.people {
-		links = append(links, personLink{APIURL: "http://localhost:8080/transformers/people/" + sub.UUID})
-	}
-	return links, s.found
+func (s *dummyService) getPeople() (io.PipeReader, error) {
+	pv, pw := io.Pipe()
+	go func() {
+		encoder := json.NewEncoder(pw)
+		for _, sub := range s.people {
+			encoder.Encode(sub)
+		}
+		pw.Close()
+	}()
+	return *pv, nil
+}
+
+func (s *dummyService) getPeopleLinks() (io.PipeReader, error) {
+	pv, pw := io.Pipe()
+	go func() {
+		var links []personLink
+		for _, sub := range s.people {
+			links = append(links, personLink{APIURL: "http://localhost:8080/transformers/people/" + sub.UUID})
+		}
+		b, _ := json.Marshal(links)
+		log.Infof("Writing bytes... %v", string(b))
+		pw.Write(b)
+		pw.Close()
+	}()
+	return *pv, nil
+}
+
+func (s *dummyService) getPeopleUUIDs() (io.PipeReader, error) {
+	pv, pw := io.Pipe()
+	go func() {
+		var links []personUUID
+		for _, sub := range s.people {
+			links = append(links, personUUID{UUID: sub.UUID})
+		}
+		b, _ := json.Marshal(links)
+		log.Infof("Writing bytes... %v", string(b))
+		pw.Write(b)
+		pw.Close()
+	}()
+	return *pv, nil
 }
 
 func (s *dummyService) getCount() (int, error) {
@@ -303,6 +376,7 @@ func router(s PeopleService) *mux.Router {
 	m.HandleFunc("/transformers/people", h.GetPeople).Methods("GET")
 	m.HandleFunc("/transformers/people/__count", h.GetCount).Methods("GET")
 	m.HandleFunc("/transformers/people/__reload", h.Reload).Methods("POST")
+	m.HandleFunc("/transformers/people/__id", h.GetPeopleUUIDs).Methods("GET")
 	m.HandleFunc("/transformers/people/{uuid}", h.GetPersonByUUID).Methods("GET")
 	m.HandleFunc("/__health", v1a.Handler("V1 People Transformer Healthchecks", "Checks for the health of the service", h.HealthCheck()))
 	g2gHandler := status.NewGoodToGoHandler(gtg.StatusChecker(h.G2GCheck))
