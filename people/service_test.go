@@ -68,6 +68,39 @@ func TestGetPeople(t *testing.T) {
 	assert.Equal(t, "be2e7e2b-0fa2-3969-a69b-74c46e754032", res[1].UUID)
 }
 
+func TestGetPeopleByUUID(t *testing.T) {
+	tmpfile := getTempFile(t)
+	defer os.Remove(tmpfile.Name())
+	repo := dummyRepo{terms: []term{{CanonicalName: "Bob", RawID: "bob"}, {CanonicalName: "Fred", RawID: "fred"}}}
+	service := createTestPeopleService(&repo, tmpfile.Name())
+	defer service.Shutdown()
+	waitTillInit(t, service)
+	waitTillDataLoaded(t, service)
+	pv, err := service.getPeopleUUIDs()
+
+	var wg sync.WaitGroup
+	var res []personUUID
+	wg.Add(1)
+	go func(reader io.Reader, w *sync.WaitGroup) {
+		var err error
+		scan := bufio.NewScanner(reader)
+		for scan.Scan() {
+			var p personUUID
+			assert.NoError(t, err)
+			err = json.Unmarshal(scan.Bytes(), &p)
+			assert.NoError(t, err)
+			res = append(res, p)
+		}
+		wg.Done()
+	}(&pv, &wg)
+	wg.Wait()
+
+	assert.NoError(t, err)
+	assert.Len(t, res, 2)
+	assert.Equal(t, "28d66fcc-bb56-363d-80c1-f2d957ef58cf", res[0].UUID)
+	assert.Equal(t, "be2e7e2b-0fa2-3969-a69b-74c46e754032", res[1].UUID)
+}
+
 func TestGetPeopleLink(t *testing.T) {
 	tmpfile := getTempFile(t)
 	defer os.Remove(tmpfile.Name())
@@ -96,36 +129,6 @@ func TestGetPeopleLink(t *testing.T) {
 	assert.Len(t, res, 2)
 	assert.Equal(t, "/base/url/28d66fcc-bb56-363d-80c1-f2d957ef58cf", res[0].APIURL)
 	assert.Equal(t, "/base/url/be2e7e2b-0fa2-3969-a69b-74c46e754032", res[1].APIURL)
-}
-
-func TestGetPeopleByUUID(t *testing.T) {
-	tmpfile := getTempFile(t)
-	defer os.Remove(tmpfile.Name())
-	repo := dummyRepo{terms: []term{{CanonicalName: "Bob", RawID: "bob"}, {CanonicalName: "Fred", RawID: "fred"}}}
-	service := createTestPeopleService(&repo, tmpfile.Name())
-	defer service.Shutdown()
-	waitTillInit(t, service)
-	waitTillDataLoaded(t, service)
-	pv, err := service.getPeopleUUIDs()
-
-	var wg sync.WaitGroup
-	var res []personUUID
-	wg.Add(1)
-	go func(reader io.Reader, w *sync.WaitGroup) {
-		var err error
-		jsonBlob, err := ioutil.ReadAll(reader)
-		assert.NoError(t, err)
-		log.Infof("Got bytes: %v", string(jsonBlob[:]))
-		err = json.Unmarshal(jsonBlob, &res)
-		assert.NoError(t, err)
-		wg.Done()
-	}(&pv, &wg)
-	wg.Wait()
-
-	assert.NoError(t, err)
-	assert.Len(t, res, 2)
-	assert.Equal(t, "28d66fcc-bb56-363d-80c1-f2d957ef58cf", res[0].UUID)
-	assert.Equal(t, "be2e7e2b-0fa2-3969-a69b-74c46e754032", res[1].UUID)
 }
 
 func TestGetCount(t *testing.T) {

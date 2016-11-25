@@ -26,8 +26,9 @@ const (
 	getPeopleResponse = `{"uuid":"bba39990-c78d-3629-ae83-808c333c6dbc","prefLabel":"","type":"","alternativeIdentifiers":{}}
 {"uuid":"be2e7e2b-0fa2-3969-a69b-74c46e754032","prefLabel":"","type":"","alternativeIdentifiers":{}}
 `
-	getPeopleLinkResponse   = "[{\"apiUrl\":\"http://localhost:8080/transformers/people/bba39990-c78d-3629-ae83-808c333c6dbc\"}]"
-	getPeopleByUUIDResponse = "[{\"ID\":\"bba39990-c78d-3629-ae83-808c333c6dbc\"}]"
+	getPeopleByUUIDResponse = `{"ID":"bba39990-c78d-3629-ae83-808c333c6dbc"}
+{"ID":"be2e7e2b-0fa2-3969-a69b-74c46e754032"}
+`
 	getPersonByUUIDResponse = "{\"uuid\":\"bba39990-c78d-3629-ae83-808c333c6dbc\",\"prefLabel\":\"European Union\",\"type\":\"Organisation\",\"alternativeIdentifiers\":{\"TME\":[\"MTE3-U3ViamVjdHM=\"],\"uuids\":[\"bba39990-c78d-3629-ae83-808c333c6dbc\"]}}\n"
 )
 
@@ -133,7 +134,7 @@ func TestHandlers(t *testing.T) {
 				found:       true,
 				initialised: true,
 				count:       1,
-				people:      []person{{UUID: testUUID}}},
+				people:      []person{{UUID: testUUID}, {UUID: testUUID2}}},
 			http.StatusOK,
 			"application/json",
 			getPeopleByUUIDResponse},
@@ -314,27 +315,24 @@ func (s *dummyService) getPeople() (io.PipeReader, error) {
 	return *pv, nil
 }
 
+func (s *dummyService) getPeopleUUIDs() (io.PipeReader, error) {
+	pv, pw := io.Pipe()
+	go func() {
+		encoder := json.NewEncoder(pw)
+		for _, sub := range s.people {
+			encoder.Encode(personUUID{UUID: sub.UUID})
+		}
+		pw.Close()
+	}()
+	return *pv, nil
+}
+
 func (s *dummyService) getPeopleLinks() (io.PipeReader, error) {
 	pv, pw := io.Pipe()
 	go func() {
 		var links []personLink
 		for _, sub := range s.people {
 			links = append(links, personLink{APIURL: "http://localhost:8080/transformers/people/" + sub.UUID})
-		}
-		b, _ := json.Marshal(links)
-		log.Infof("Writing bytes... %v", string(b))
-		pw.Write(b)
-		pw.Close()
-	}()
-	return *pv, nil
-}
-
-func (s *dummyService) getPeopleUUIDs() (io.PipeReader, error) {
-	pv, pw := io.Pipe()
-	go func() {
-		var links []personUUID
-		for _, sub := range s.people {
-			links = append(links, personUUID{UUID: sub.UUID})
 		}
 		b, _ := json.Marshal(links)
 		log.Infof("Writing bytes... %v", string(b))
