@@ -6,6 +6,7 @@ type person struct {
 	PrefLabel              string                 `json:"prefLabel"`
 	Type                   string                 `json:"type"`
 	AlternativeIdentifiers alternativeIdentifiers `json:"alternativeIdentifiers,omitempty"`
+	Aliases                []string               `json:"aliases,omitempty"`
 }
 
 type alternativeIdentifiers struct {

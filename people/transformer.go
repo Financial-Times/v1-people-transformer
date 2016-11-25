@@ -12,6 +12,7 @@ type PersonTransformer struct {
 func transformPerson(tmeTerm term, taxonomyName string) person {
 	tmeIdentifier := buildTmeIdentifier(tmeTerm.RawID, taxonomyName)
 	personUUID := uuid.NewMD5(uuid.UUID{}, []byte(tmeIdentifier)).String()
+	aliasList := buildAliasList(tmeTerm.Aliases)
 	return person{
 		UUID:      personUUID,
 		PrefLabel: tmeTerm.CanonicalName,
@@ -19,7 +20,8 @@ func transformPerson(tmeTerm term, taxonomyName string) person {
 			TME:   []string{tmeIdentifier},
 			Uuids: []string{personUUID},
 		},
-		Type: "Person",
+		Type:    "Person",
+		Aliases: aliasList,
 	}
 }
 
@@ -27,6 +29,14 @@ func buildTmeIdentifier(rawID string, tmeTermTaxonomyName string) string {
 	id := base64.StdEncoding.EncodeToString([]byte(rawID))
 	taxonomyName := base64.StdEncoding.EncodeToString([]byte(tmeTermTaxonomyName))
 	return id + "-" + taxonomyName
+}
+
+func buildAliasList(aList aliases) []string {
+	aliasList := make([]string, len(aList.Alias))
+	for k, v := range aList.Alias {
+		aliasList[k] = v.Name
+	}
+	return aliasList
 }
 
 func (*PersonTransformer) UnMarshallTaxonomy(contents []byte) ([]interface{}, error) {
