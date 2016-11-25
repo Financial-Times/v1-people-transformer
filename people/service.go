@@ -129,6 +129,31 @@ func (s *peopleServiceImpl) getPeople() (io.PipeReader, error) {
 	return *pv, nil
 }
 
+func (s *peopleServiceImpl) getPeopleUUIDs() (io.PipeReader, error) {
+	s.RLock()
+	pv, pw := io.Pipe()
+	go func() {
+		defer s.RUnlock()
+		defer pw.Close()
+		s.db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(cacheBucket))
+			c := b.Cursor()
+			encoder := json.NewEncoder(pw)
+			for k, _ := c.First(); k != nil; k, _ = c.Next() {
+				if k == nil {
+					break
+				}
+				pl := personUUID{UUID: string(k[:])}
+				if err := encoder.Encode(pl); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}()
+	return *pv, nil
+}
+
 func (s *peopleServiceImpl) getPeopleLinks() (io.PipeReader, error) {
 	s.RLock()
 	pv, pw := io.Pipe()
@@ -147,38 +172,6 @@ func (s *peopleServiceImpl) getPeopleLinks() (io.PipeReader, error) {
 					break
 				}
 				pl := personLink{APIURL: s.baseURL + "/" + string(k[:])}
-				if err := encoder.Encode(pl); err != nil {
-					return err
-				}
-				if k, _ = c.Next(); k != nil {
-					io.WriteString(pw, ",")
-				}
-			}
-			return nil
-		})
-		io.WriteString(pw, "]")
-	}()
-	return *pv, nil
-}
-
-func (s *peopleServiceImpl) getPeopleUUIDs() (io.PipeReader, error) {
-	s.RLock()
-	pv, pw := io.Pipe()
-	go func() {
-		defer s.RUnlock()
-		defer pw.Close()
-		io.WriteString(pw, "[")
-		s.db.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(cacheBucket))
-			c := b.Cursor()
-			encoder := json.NewEncoder(pw)
-			var k []byte
-			k, _ = c.First()
-			for {
-				if k == nil {
-					break
-				}
-				pl := personUUID{UUID: string(k[:])}
 				if err := encoder.Encode(pl); err != nil {
 					return err
 				}
