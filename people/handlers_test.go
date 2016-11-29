@@ -78,7 +78,7 @@ func TestHandlers(t *testing.T) {
 				people:      []person{{UUID: testUUID}}},
 			http.StatusOK,
 			"application/json",
-			"1\n"},
+			"1"},
 		{"Failure - get people count",
 			newRequest("GET", "/transformers/people/__count"),
 			&dummyService{

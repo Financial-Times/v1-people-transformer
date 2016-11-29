@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 type PeopleHandler struct {
@@ -67,17 +68,18 @@ func (h *PeopleHandler) GetPeopleUUIDs(writer http.ResponseWriter, req *http.Req
 }
 
 func (h *PeopleHandler) GetCount(writer http.ResponseWriter, req *http.Request) {
-	writer.Header().Add("Content-Type", "application/json")
 	if !h.service.isInitialised() {
+		writer.Header().Add("Content-Type", "application/json")
 		writeStatusServiceUnavailable(writer)
 		return
 	}
 	count, err := h.service.getCount()
 	if err != nil {
+		writer.Header().Add("Content-Type", "application/json")
 		writeJSONMessageWithStatus(writer, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSONResponse(count, true, writer)
+	writer.Write([]byte(strconv.Itoa(count)))
 }
 
 func (h *PeopleHandler) HealthCheck() v1a.Check {
