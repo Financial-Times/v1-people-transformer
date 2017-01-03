@@ -1,9 +1,10 @@
 package people
 
 import (
+	"testing"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 const (
@@ -28,4 +29,5 @@ func TestTransformPerson(t *testing.T) {
 	assert.Equal(t, "b", tfp.Aliases[1])
 	assert.Equal(t, "0e86d39b-8320-3a98-a87a-ff35d2cb04b9", tfp.UUID)
 	assert.Equal(t, "Bob", tfp.PrefLabel)
+	assert.Equal(t, "Bob", tfp.Name)
 }

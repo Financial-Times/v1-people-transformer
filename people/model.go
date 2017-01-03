@@ -4,6 +4,7 @@ package people
 type person struct {
 	UUID                   string                 `json:"uuid"`
 	PrefLabel              string                 `json:"prefLabel"`
+	Name                   string                 `json:"name,omitempty"`
 	Type                   string                 `json:"type"`
 	AlternativeIdentifiers alternativeIdentifiers `json:"alternativeIdentifiers,omitempty"`
 	Aliases                []string               `json:"aliases,omitempty"`
