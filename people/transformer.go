@@ -3,6 +3,7 @@ package people
 import (
 	"encoding/base64"
 	"encoding/xml"
+
 	"github.com/pborman/uuid"
 )
 
@@ -16,6 +17,7 @@ func transformPerson(tmeTerm term, taxonomyName string) person {
 	return person{
 		UUID:      personUUID,
 		PrefLabel: tmeTerm.CanonicalName,
+		Name:      tmeTerm.CanonicalName,
 		AlternativeIdentifiers: alternativeIdentifiers{
 			TME:   []string{tmeIdentifier},
 			Uuids: []string{personUUID},
