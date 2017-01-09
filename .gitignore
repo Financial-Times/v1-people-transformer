@@ -8,3 +8,6 @@ v1-people-transformer
 .idea/
 *.db
 *.lock
+
+.vscode
+debug
