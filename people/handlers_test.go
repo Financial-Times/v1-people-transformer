@@ -4,12 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Financial-Times/go-fthealth/v1a"
-	"github.com/Financial-Times/service-status-go/gtg"
-	status "github.com/Financial-Times/service-status-go/httphandlers"
-	log "github.com/Sirupsen/logrus"
-	"github.com/gorilla/mux"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -18,6 +12,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/Financial-Times/go-fthealth/v1a"
+	"github.com/Financial-Times/service-status-go/gtg"
+	status "github.com/Financial-Times/service-status-go/httphandlers"
+	log "github.com/Sirupsen/logrus"
+	"github.com/gorilla/mux"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -51,6 +52,15 @@ func TestHandlers(t *testing.T) {
 			http.StatusOK,
 			"application/json",
 			getPersonByUUIDResponse},
+		{"405 - get person by uuid",
+			newRequest("POST", fmt.Sprintf("/transformers/people/%s", testUUID)),
+			&dummyService{
+				found:       true,
+				initialised: true,
+				people:      []person{{UUID: testUUID, PrefLabel: "European Union", AlternativeIdentifiers: alternativeIdentifiers{Uuids: []string{testUUID}, TME: []string{"MTE3-U3ViamVjdHM="}}, Type: "Organisation"}}},
+			http.StatusMethodNotAllowed,
+			"application/json",
+			""},
 		{"Not found - get person by uuid",
 			newRequest("GET", fmt.Sprintf("/transformers/people/%s", testUUID)),
 			&dummyService{
@@ -79,6 +89,16 @@ func TestHandlers(t *testing.T) {
 			http.StatusOK,
 			"application/json",
 			"1"},
+		{"405 - get people count",
+			newRequest("POST", "/transformers/people/__count"),
+			&dummyService{
+				found:       true,
+				count:       1,
+				initialised: true,
+				people:      []person{{UUID: testUUID}}},
+			http.StatusMethodNotAllowed,
+			"application/json",
+			""},
 		{"Failure - get people count",
 			newRequest("GET", "/transformers/people/__count"),
 			&dummyService{
@@ -110,6 +130,16 @@ func TestHandlers(t *testing.T) {
 			http.StatusOK,
 			"application/json",
 			getPeopleResponse},
+		{"POST people - Fail with 405",
+			newRequest("POST", "/transformers/people"),
+			&dummyService{
+				found:       true,
+				initialised: true,
+				count:       2,
+				people:      []person{{UUID: testUUID}, {UUID: testUUID2}}},
+			http.StatusMethodNotAllowed,
+			"application/json",
+			""},
 		{"get people - Not found",
 			newRequest("GET", "/transformers/people"),
 			&dummyService{
@@ -129,7 +159,7 @@ func TestHandlers(t *testing.T) {
 			"application/json",
 			"{\"message\": \"Service Unavailable\"}\n"},
 		{"get people IDS - Success",
-			newRequest("GET", "/transformers/people/__id"),
+			newRequest("GET", "/transformers/people/__ids"),
 			&dummyService{
 				found:       true,
 				initialised: true,
@@ -138,8 +168,18 @@ func TestHandlers(t *testing.T) {
 			http.StatusOK,
 			"application/json",
 			getPeopleByUUIDResponse},
+		{"get people IDS - 405",
+			newRequest("POST", "/transformers/people/__ids"),
+			&dummyService{
+				found:       true,
+				initialised: true,
+				count:       1,
+				people:      []person{{UUID: testUUID}, {UUID: testUUID2}}},
+			http.StatusMethodNotAllowed,
+			"application/json",
+			""},
 		{"get people IDS - Not found",
-			newRequest("GET", "/transformers/people/__id"),
+			newRequest("GET", "/transformers/people/__ids"),
 			&dummyService{
 				initialised: true,
 				count:       0,
@@ -148,7 +188,7 @@ func TestHandlers(t *testing.T) {
 			"application/json",
 			"{\"message\": \"People not found\"}\n"},
 		{"get people IDS - Service unavailable",
-			newRequest("GET", "/transformers/people/__id"),
+			newRequest("GET", "/transformers/people/__ids"),
 			&dummyService{
 				found:       false,
 				initialised: false,
@@ -216,6 +256,15 @@ func TestHandlers(t *testing.T) {
 			http.StatusAccepted,
 			"application/json",
 			"{\"message\": \"Reloading people\"}\n"},
+		{"405 - request reload",
+			newRequest("GET", "/transformers/people/__reload"),
+			&dummyService{
+				wg:          &wg,
+				initialised: true,
+				dataLoaded:  true},
+			http.StatusMethodNotAllowed,
+			"application/json",
+			""},
 		{"Reload accepted even though error loading data in background.",
 			newRequest("POST", "/transformers/people/__reload"),
 			&dummyService{
@@ -369,15 +418,31 @@ func (s *dummyService) reloadDB() error {
 }
 
 func router(s PeopleService) *mux.Router {
-	m := mux.NewRouter()
-	h := NewPeopleHandler(s)
-	m.HandleFunc("/transformers/people", h.GetPeople).Methods("GET")
-	m.HandleFunc("/transformers/people/__count", h.GetCount).Methods("GET")
-	m.HandleFunc("/transformers/people/__reload", h.Reload).Methods("POST")
-	m.HandleFunc("/transformers/people/__id", h.GetPeopleUUIDs).Methods("GET")
-	m.HandleFunc("/transformers/people/{uuid}", h.GetPersonByUUID).Methods("GET")
-	m.HandleFunc("/__health", v1a.Handler("V1 People Transformer Healthchecks", "Checks for the health of the service", h.HealthCheck()))
-	g2gHandler := status.NewGoodToGoHandler(gtg.StatusChecker(h.G2GCheck))
-	m.HandleFunc(status.GTGPath, g2gHandler)
-	return m
+	servicesRouter := mux.NewRouter()
+	handler := NewPeopleHandler(s)
+
+	getPeopleSubrouter := servicesRouter.Path("/transformers/people").Subrouter()
+	getPeopleSubrouter.Methods("GET").HandlerFunc(handler.GetPeople)
+	getPeopleSubrouter.NewRoute().HandlerFunc(handler.OnlyGetAllowed)
+
+	personCountSubrouter := servicesRouter.Path("/transformers/people/__count").Subrouter()
+	personCountSubrouter.Methods("GET").HandlerFunc(handler.GetCount)
+	personCountSubrouter.NewRoute().HandlerFunc(handler.OnlyGetAllowed)
+
+	personIDsSubrouter := servicesRouter.Path("/transformers/people/__ids").Subrouter()
+	personIDsSubrouter.Methods("GET").HandlerFunc(handler.GetPeopleUUIDs)
+	personIDsSubrouter.NewRoute().HandlerFunc(handler.OnlyGetAllowed)
+
+	personByUUIDSubrouter := servicesRouter.Path("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}").Subrouter()
+	personByUUIDSubrouter.Methods("GET").HandlerFunc(handler.GetPersonByUUID)
+	personByUUIDSubrouter.NewRoute().HandlerFunc(handler.OnlyGetAllowed)
+
+	reloadSubrouter := servicesRouter.Path("/transformers/people/__reload").Subrouter()
+	reloadSubrouter.Methods("POST").HandlerFunc(handler.Reload)
+	reloadSubrouter.NewRoute().HandlerFunc(handler.OnlyPostAllowed)
+
+	servicesRouter.HandleFunc("/__health", v1a.Handler("V1 People Transformer Healthchecks", "Checks for the health of the service", handler.HealthCheck()))
+	g2gHandler := status.NewGoodToGoHandler(gtg.StatusChecker(handler.G2GCheck))
+	servicesRouter.HandleFunc(status.GTGPath, g2gHandler)
+	return servicesRouter
 }

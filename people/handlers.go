@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+
 	"github.com/Financial-Times/go-fthealth/v1a"
 	"github.com/Financial-Times/service-status-go/gtg"
 	log "github.com/Sirupsen/logrus"
 	"github.com/gorilla/mux"
-	"io"
-	"net/http"
-	"strconv"
 )
 
 type PeopleHandler struct {
@@ -159,4 +160,16 @@ func writeJSONMessageWithStatus(w http.ResponseWriter, msg string, statusCode in
 
 func writeStatusServiceUnavailable(w http.ResponseWriter) {
 	writeJSONMessageWithStatus(w, "Service Unavailable", http.StatusServiceUnavailable)
+}
+
+//OnlyPostAllowed - Used to tell the user the METHOD type is not POST.
+func (h *PeopleHandler) OnlyPostAllowed(writer http.ResponseWriter, req *http.Request) {
+	writer.Header().Set("Allow", "POST")
+	writer.WriteHeader(http.StatusMethodNotAllowed)
+}
+
+//OnlyGetAllowed - Used to tell the user the METHOD type is not GET.
+func (h *PeopleHandler) OnlyGetAllowed(writer http.ResponseWriter, req *http.Request) {
+	writer.Header().Set("Allow", "GET")
+	writer.WriteHeader(http.StatusMethodNotAllowed)
 }

@@ -2,6 +2,12 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
+	"os"
+	"time"
+
 	"github.com/Financial-Times/base-ft-rw-app-go/baseftrwapp"
 	"github.com/Financial-Times/go-fthealth/v1a"
 	"github.com/Financial-Times/http-handlers-go/httphandlers"
@@ -14,11 +20,6 @@ import (
 	"github.com/jawher/mow.cli"
 	"github.com/rcrowley/go-metrics"
 	"github.com/sethgrid/pester"
-	"net"
-	"net/http"
-	_ "net/http/pprof"
-	"os"
-	"time"
 )
 
 func main() {
@@ -134,11 +135,25 @@ func main() {
 func router(handler people.PeopleHandler) {
 	servicesRouter := mux.NewRouter()
 
-	servicesRouter.HandleFunc("/transformers/people", handler.GetPeople).Methods("GET")
-	servicesRouter.HandleFunc("/transformers/people/__count", handler.GetCount).Methods("GET")
-	servicesRouter.HandleFunc("/transformers/people/__ids", handler.GetPeopleUUIDs).Methods("GET")
-	servicesRouter.HandleFunc("/transformers/people/__reload", handler.Reload).Methods("POST")
-	servicesRouter.HandleFunc("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}", handler.GetPersonByUUID).Methods("GET")
+	getPeopleSubrouter := servicesRouter.Path("/transformers/people").Subrouter()
+	getPeopleSubrouter.Methods("GET").HandlerFunc(handler.GetPeople)
+	getPeopleSubrouter.NewRoute().HandlerFunc(handler.OnlyGetAllowed)
+
+	personCountSubrouter := servicesRouter.Path("/transformers/people/__count").Subrouter()
+	personCountSubrouter.Methods("GET").HandlerFunc(handler.GetCount)
+	personCountSubrouter.NewRoute().HandlerFunc(handler.OnlyGetAllowed)
+
+	personIDsSubrouter := servicesRouter.Path("/transformers/people/__ids").Subrouter()
+	personIDsSubrouter.Methods("GET").HandlerFunc(handler.GetPeopleUUIDs)
+	personIDsSubrouter.NewRoute().HandlerFunc(handler.OnlyGetAllowed)
+
+	personByUUIDSubrouter := servicesRouter.Path("/transformers/people/{uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})}").Subrouter()
+	personByUUIDSubrouter.Methods("GET").HandlerFunc(handler.GetPersonByUUID)
+	personByUUIDSubrouter.NewRoute().HandlerFunc(handler.OnlyGetAllowed)
+
+	reloadSubrouter := servicesRouter.Path("/transformers/people/__reload").Subrouter()
+	reloadSubrouter.Methods("POST").HandlerFunc(handler.Reload)
+	reloadSubrouter.NewRoute().HandlerFunc(handler.OnlyPostAllowed)
 
 	var monitoringRouter http.Handler = servicesRouter
 	monitoringRouter = httphandlers.TransactionAwareRequestLoggingHandler(log.StandardLogger(), monitoringRouter)
