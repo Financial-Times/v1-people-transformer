@@ -1,3 +1,4 @@
+# DECOMMISIONED - See https://github.com/Financial-Times/basic-tme-transformer instead
 # V1 People Transformer
 [![CircleCI](https://circleci.com/gh/Financial-Times/v1-people-transformer.svg?style=svg)](https://circleci.com/gh/Financial-Times/v1-people-transformer) [![Go Report Card](https://goreportcard.com/badge/github.com/Financial-Times/v1-people-transformer)](https://goreportcard.com/report/github.com/Financial-Times/v1-people-transformer) [![Coverage Status](https://coveralls.io/repos/github/Financial-Times/v1-people-transformer/badge.svg?branch=master)](https://coveralls.io/github/Financial-Times/v1-people-transformer?branch=master)
 
